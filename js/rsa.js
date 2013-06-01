@@ -328,9 +328,6 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
 
   // error if the length of the encrypted data ED is not k
   if(ed.length != k) {
-    console.log("ed = " + ed);
-    console.log("ed.length = " + ed.length);
-    console.log("k = " + k);
     throw {
       message: 'Encrypted message length is invalid.',
       length: ed.length,
@@ -355,7 +352,6 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
   var zeros = k - Math.ceil(xhex.length / 2);
   var tmpbuff = new Buffer(zeros);
   tmpbuff.fill(0x00);
-  console.log(xhex);
   eb = Buffer.concat([eb, tmpbuff, new Buffer(xhex,'hex')]);
 
   if(ml !== false) {
@@ -418,14 +414,7 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
 
     // zero must be 0x00 and padNum must be (k - 3 - message length)
     var zero = eb[readeb++];
-    // DEBUG
-    console.log("zero = " + zero);
-    console.log("padnum = " + padNum);
     var test = k - 3 - (eb.length - readeb);
-    console.log("k = " + k);
-    console.log("eb.length = " + eb.length);
-    console.log("readeb = " + readeb);
-    console.log("k - 3 - (eb.length - readeb) = " + test);
     if(zero !== 0x00 || padNum !== (k - 3 - (eb.length - readeb))) {
       throw {
         message: 'Encryption block is invalid.'
