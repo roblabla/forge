@@ -28,7 +28,7 @@
   },
   "main": "js/forge.js",
   "engines": {
-    "node": "*"
+    "node": ">=0.7.11"
   },
   "keywords": [
     "tls",

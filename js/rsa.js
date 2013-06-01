@@ -218,16 +218,17 @@ var _modPow = function(x, key, pub) {
  * (for signing) or 0x02 (for encryption).  The key operation mode (private
  * or public) is derived from this flag in that case).
  *
- * @param m the message to encrypt as a byte string.
+ * @param m the message to encrypt as a Buffer.
  * @param key the RSA key to use.
  * @param bt for PKCS#1 v1.5 padding, the block type to use
  *   (0x01 for private key, 0x02 for public),
  *   to disable padding: true = public key, false = private key
- * @return the encrypted bytes as a string.
+ * @return the encrypted bytes as a Buffer.
  */
 pki.rsa.encrypt = function(m, key, bt) {
   var pub = bt;
-  var eb = forge.util.createBuffer();
+
+  var eb = new Buffer(0);
 
   // get the length of the modulus in bytes
   var k = Math.ceil(key.n.bitLength() / 8);
@@ -259,8 +260,7 @@ pki.rsa.encrypt = function(m, key, bt) {
       encryption block EB equal to k. */
 
     // build the encryption block
-    eb.putByte(0x00);
-    eb.putByte(bt);
+    eb = new Buffer([0x00, bt]);
 
     // create the padding, get key type
     var padNum = k - 3 - m.length;
@@ -268,27 +268,28 @@ pki.rsa.encrypt = function(m, key, bt) {
     if(bt === 0x00 || bt === 0x01) {
       pub = false;
       padByte = (bt === 0x00) ? 0x00 : 0xFF;
-      for(var i = 0; i < padNum; ++i) {
-        eb.putByte(padByte);
-      }
+      var tmpbuff = new Buffer(padNum);
+      tmpbuff.fill(padByte);
+      eb = Buffer.concat([eb, tmpbuff]);
     }
     else {
       pub = true;
+      var tmpbuff = new Buffer(padNum);
       for(var i = 0; i < padNum; ++i) {
-        padByte = Math.floor(Math.random() * 255) + 1;
-        eb.putByte(padByte);
+        tmpbuff[i] = Math.floor(Math.random() * 255) + 1;
       }
+      eb = Buffer.concat([eb, tmpbuff]);
     }
 
     // zero followed by message
-    eb.putByte(0x00);
+    eb = Buffer.concat([eb, new Buffer([0x00])]);
   }
 
-  eb.putBytes(m);
+  eb = Buffer.concat([eb, m]);
 
   // load encryption block as big integer 'x'
   // FIXME: hex conversion inefficient, get BigInteger w/byte strings
-  var x = new BigInteger(eb.toHex(), 16);
+  var x = new BigInteger(eb.toString('hex'), 16);
 
   // do RSA encryption
   var y = _modPow(x, key, pub);
@@ -297,14 +298,13 @@ pki.rsa.encrypt = function(m, key, bt) {
   // bytes than k, then prepend zero bytes to fill up ed
   // FIXME: hex conversion inefficient, get BigInteger w/byte strings
   var yhex = y.toString(16);
-  var ed = forge.util.createBuffer();
+  if (yhex.length % 2 == 1) yhex = "0" + yhex;
+  var ed = new Buffer(0);
   var zeros = k - Math.ceil(yhex.length / 2);
-  while(zeros > 0) {
-    ed.putByte(0x00);
-    --zeros;
-  }
-  ed.putBytes(forge.util.hexToBytes(yhex));
-  return ed.getBytes();
+  var tmpbuff = new Buffer(zeros);
+  tmpbuff.fill(0x00);
+  ed = Buffer.concat([ed, tmpbuff, new Buffer(yhex, 'hex')]);
+  return ed;
 };
 
 /**
@@ -315,7 +315,7 @@ pki.rsa.encrypt = function(m, key, bt) {
  * (in order to handle e.g. EMSA-PSS later on) and simply pass back
  * the RSA encryption block.
  *
- * @param ed the encrypted data to decrypt in as a byte string.
+ * @param ed the encrypted data to decrypt in as a Buffer.
  * @param key the RSA key to use.
  * @param pub true for a public key operation, false for private.
  * @param ml the message length, if known.  false to disable padding.
@@ -328,6 +328,9 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
 
   // error if the length of the encrypted data ED is not k
   if(ed.length != k) {
+    console.log("ed = " + ed);
+    console.log("ed.length = " + ed.length);
+    console.log("k = " + k);
     throw {
       message: 'Encrypted message length is invalid.',
       length: ed.length,
@@ -337,7 +340,7 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
 
   // convert encrypted data into a big integer
   // FIXME: hex conversion inefficient, get BigInteger w/byte strings
-  var y = new BigInteger(forge.util.createBuffer(ed).toHex(), 16);
+  var y = new BigInteger(ed.toString('hex'), 16);
 
   // do RSA decryption
   var x = _modPow(y, key, pub);
@@ -346,13 +349,14 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
   // prepend zero bytes to fill up eb
   // FIXME: hex conversion inefficient, get BigInteger w/byte strings
   var xhex = x.toString(16);
-  var eb = forge.util.createBuffer();
+  if (xhex.length % 2 == 1) xhex = "0" + xhex;
+  var eb = new Buffer(0);
+  var readeb = 0;
   var zeros = k - Math.ceil(xhex.length / 2);
-  while(zeros > 0) {
-    eb.putByte(0x00);
-    --zeros;
-  }
-  eb.putBytes(forge.util.hexToBytes(xhex));
+  var tmpbuff = new Buffer(zeros);
+  tmpbuff.fill(0x00);
+  console.log(xhex);
+  eb = Buffer.concat([eb, tmpbuff, new Buffer(xhex,'hex')]);
 
   if(ml !== false) {
     /* It is an error if any of the following conditions occurs:
@@ -366,8 +370,8 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
      */
 
     // parse the encryption block
-    var first = eb.getByte();
-    var bt = eb.getByte();
+    var first = eb[readeb++];
+    var bt = eb[readeb++];
     if(first !== 0x00 ||
       (pub && bt !== 0x00 && bt !== 0x01) ||
       (!pub && bt != 0x02) ||
@@ -382,7 +386,7 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
       // check all padding bytes for 0x00
       padNum = k - 3 - ml;
       for(var i = 0; i < padNum; ++i) {
-        if(eb.getByte() !== 0x00) {
+        if(eb[readeb++] !== 0x00) {
           throw {
             message: 'Encryption block is invalid.'
           };
@@ -392,9 +396,9 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
     else if(bt === 0x01) {
       // find the first byte that isn't 0xFF, should be after all padding
       padNum = 0;
-      while(eb.length() > 1) {
-        if(eb.getByte() !== 0xFF) {
-          --eb.read;
+      while(eb.length - readeb > 1) {
+        if(eb[readeb++] !== 0xFF) {
+          --readeb;
           break;
         }
         ++padNum;
@@ -403,9 +407,9 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
     else if(bt === 0x02) {
       // look for 0x00 byte
       padNum = 0;
-      while(eb.length() > 1) {
-        if(eb.getByte() === 0x00) {
-          --eb.read;
+      while(eb.length - readeb > 1) {
+        if(eb[readeb++] === 0x00) {
+          --readeb;
           break;
         }
         ++padNum;
@@ -413,8 +417,16 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
     }
 
     // zero must be 0x00 and padNum must be (k - 3 - message length)
-    var zero = eb.getByte();
-    if(zero !== 0x00 || padNum !== (k - 3 - eb.length())) {
+    var zero = eb[readeb++];
+    // DEBUG
+    console.log("zero = " + zero);
+    console.log("padnum = " + padNum);
+    var test = k - 3 - (eb.length - readeb);
+    console.log("k = " + k);
+    console.log("eb.length = " + eb.length);
+    console.log("readeb = " + readeb);
+    console.log("k - 3 - (eb.length - readeb) = " + test);
+    if(zero !== 0x00 || padNum !== (k - 3 - (eb.length - readeb))) {
       throw {
         message: 'Encryption block is invalid.'
       };
@@ -422,7 +434,7 @@ pki.rsa.decrypt = function(ed, key, pub, ml) {
   }
 
   // return message
-  return eb.getBytes();
+  return eb.slice(readeb);
 };
 
 /**
